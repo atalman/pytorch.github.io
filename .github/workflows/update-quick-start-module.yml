@@ -1,5 +1,8 @@
 name: Update quick start module
 on:
+  schedule:
+    # At 18:30 pm UTC (1:30 pm EST)
+    - cron: "30 18 * * *"
   pull_request:
     paths:
       - .github/workflows/update-quick-start-module.yml
@@ -10,6 +13,7 @@ on:
     paths:
       - .github/workflows/update-quick-start-module.yml
       - /scripts/gen_quick_start_module.py
+  workflow_dispatch:
 
 jobs:
   linux-nightly-matrix:
