@@ -100,7 +100,7 @@ function getPreferredCuda(os) {
   if (os == 'macos') {
     return 'accnone';
   }
-  return 'cuda11.6';
+  return 'cuda.x';
 }
 
 // Disable compute platform not supported on OS
