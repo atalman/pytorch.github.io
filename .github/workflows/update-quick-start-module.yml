@@ -79,8 +79,8 @@ jobs:
           MACOS_RELEASE_MATRIX: ${{ needs.macos-release-matrix.outputs.matrix }}
         run: |
           set -ex
-          printf '%s\n' "$LINUX_NIGHTLY_MATRIX" > linux_nightly_matrix.json
-          printf '%s\n' "$WINDOWS_NIGHTLY_MATRIX" > windows_nightly_matrix.json
+          # printf '%s\n' "$LINUX_NIGHTLY_MATRIX" > linux_nightly_matrix.json
+          # printf '%s\n' "$WINDOWS_NIGHTLY_MATRIX" > windows_nightly_matrix.json
           printf '%s\n' "$MACOS_NIGHTLY_MATRIX" > macos_nightly_matrix.json
           printf '%s\n' "$LINUX_RELEASE_MATRIX" > linux_release_matrix.json
           printf '%s\n' "$WINDOWS_RELEASE_MATRIX" > windows_release_matrix.json
@@ -89,7 +89,7 @@ jobs:
           rm *_matrix.json
       - uses: nashmaniac/create-issue-action@v1.1
         if: ${{ failure() }} # only run when this job is failed.
-        name: Create Issue Action
+        name: Create Issue if failed
         with:
           title: Updating quick start module failed
           token: ${{secrets.GITHUB_TOKEN}}
