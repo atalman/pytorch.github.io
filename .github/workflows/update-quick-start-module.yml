@@ -4,6 +4,13 @@ on:
     paths:
       - .github/workflows/update-quick-start-module.yml
       - /scripts/gen_quick_start_module.py
+  push:
+    branches:
+      site
+    paths:
+      - .github/workflows/update-quick-start-module.yml
+      - /scripts/gen_quick_start_module.py
+
 jobs:
   linux-nightly-matrix:
     uses: pytorch/test-infra/.github/workflows/generate_binary_build_matrix.yml@main
