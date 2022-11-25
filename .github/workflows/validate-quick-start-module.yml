@@ -3,7 +3,7 @@ on:
   pull_request:
     paths:
       - published_versions.json
-      - assets/quick-start-module.js
+      - /assets/quick-start-module.js
       - .github/workflows/validate-quick-start-module.yml
 jobs:
   validate-nightly-binaries:
