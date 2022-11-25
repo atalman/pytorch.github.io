@@ -87,9 +87,9 @@ jobs:
           printf '%s\n' "$MACOS_RELEASE_MATRIX" > macos_release_matrix.json
           python3 ./scripts/gen_quick_start_module.py --autogenerate enable > assets/quick-start-module.js
           rm *_matrix.json
-      - uses: nashmaniac/create-issue-action@v1.1
+      - name: Create Issue if failed
+        uses: dacbd/create-issue-action@main
         if: ${{ failure() }} # only run when this job is failed.
-        name: Create Issue if failed
         with:
           title: Updating quick start module failed
           token: ${{secrets.GITHUB_TOKEN}}
