@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
+"""
+Generates quick start module for https://pytorch.org/get-started/locally/ page
+If called from update-quick-start-module.yml workflow (--autogenerate parameter set)
+Will output new quick-start-module.js, and new published_version.json file
+based on the current release matrix.
+If called standalone will generate quick-start-module.js from existing
+published_version.json file
+"""
+
 import json
-import os
+import copy
 import argparse
-import io
-import sys
 from pathlib import Path
-from typing import Dict, Set, List, Iterable
+from typing import Dict
 from enum import Enum
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR =  Path(__file__).parent.parent
 
 class OperatingSystem(Enum):
     LINUX: str = "linux"
@@ -27,7 +34,6 @@ DISABLE = "disable"
 # TBD drive the mapping via:
 #  1. Scanning release matrix and picking 2 latest cuda versions and 1 latest rocm
 #  2. Possibility to override the scanning algorithm with arguments passed from workflow
-
 acc_arch_ver_map = {
     "nightly": {
         "accnone": ("cpu", ""),
@@ -50,106 +56,87 @@ LIBTORCH_DWNL_INSTR = {
         DEBUG: "Download here (Debug version):",
     }
 
+def load_json_from_basedir(filename: str):
+    try:
+        with open(BASE_DIR / filename) as fptr:
+            return json.load(fptr)
+    except FileNotFoundError as exc:
+        raise ImportError(f"File {filename} not found error: {exc.strerror}") from exc
+    except json.JSONDecodeError as exc:
+        raise ImportError(f"Invalid JSON {filename}") from exc
+
 def read_published_versions():
-    with open(os.path.join(BASE_DIR, "published_versions.json")) as fp:
-        return json.load(fp)
+    return load_json_from_basedir("published_versions.json")
 
 def write_published_versions(versions):
-    with open(os.path.join(BASE_DIR, "published_versions.json"), "w") as outfile:
-            json.dump(versions, outfile, indent=2)
+    with open(BASE_DIR / "published_versions.json", "w") as outfile:
+        json.dump(versions, outfile, indent=2)
 
-def read_matrix_for_os(osys: OperatingSystem, value: str):
-    try:
-        with open(os.path.join(BASE_DIR, f"{osys.value}_{value}_matrix.json")) as fp:
-            return json.load(fp)["include"]
-    except FileNotFoundError as e:
-        raise ImportError(f"Release matrix not found for: {osys.value} error: {e.strerror}") from e
-
+def read_matrix_for_os(osys: OperatingSystem, channel: str):
+    jsonfile = load_json_from_basedir(f"{osys.value}_{channel}_matrix.json")
+    return jsonfile["include"]
 
 def read_quick_start_module_template():
-    with open(os.path.join(BASE_DIR, "_includes", "quick-start-module.js")) as fp:
-        return fp.read()
+    with open(BASE_DIR / "_includes" / "quick-start-module.js") as fptr:
+        return fptr.read()
 
+def get_package_type(pkg_key: str, os_key: OperatingSystem) -> str:
+    if pkg_key != "pip":
+        return pkg_key
+    return "manywheel" if os_key == OperatingSystem.LINUX.value else "wheel"
+
+def get_gpu_info(acc_key, instr, acc_arch_map):
+    gpu_arch_type, gpu_arch_version = acc_arch_map[acc_key]
+    if DEFAULT in instr:
+        gpu_arch_type, gpu_arch_version = acc_arch_map["accnone"]
+    return (gpu_arch_type, gpu_arch_version)
+
+# This method is used for generating new published_versions.json file
+# It will modify versions json object with installation instructions
+# Provided by generate install matrix Github Workflow, stored in release_matrix
+# json object.
 def update_versions(versions, release_matrix, release_version):
-    version_map = {
-        "preview": "preview",
-    }
-    version = ""
+    version = "preview"
     acc_arch_map = acc_arch_ver_map[release_version]
 
-    if(release_version == "nightly"):
-        version = "preview"
-    else:
+    if release_version != "nightly":
         version = release_matrix[OperatingSystem.LINUX.value][0]["stable_version"]
-
-    # Generating for a specific version
-    if(version != "preview"):
-        version_map = {
-            version: version,
-        }
         if version not in versions["versions"]:
-            import copy
-            new_version = copy.deepcopy(versions["versions"]["preview"])
-            versions["versions"][version] = new_version
+            versions["versions"][version] = copy.deepcopy(versions["versions"]["preview"])
             versions["latest_stable"] = version
 
     # Perform update of the json file from release matrix
-    for ver, ver_key in version_map.items():
-        for os_key, os_vers in versions["versions"][ver_key].items():
-            for pkg_key, pkg_vers in os_vers.items():
-                for acc_key, instr in pkg_vers.items():
+    for os_key, os_vers in versions["versions"][version].items():
+        for pkg_key, pkg_vers in os_vers.items():
+            for acc_key, instr in pkg_vers.items():
+                package_type = get_package_type(pkg_key, os_key)
+                gpu_arch_type, gpu_arch_version = get_gpu_info(acc_key, instr, acc_arch_map)
 
-                    package_type = pkg_key
-                    if pkg_key == 'pip':
-                        package_type = 'manywheel' if os_key == OperatingSystem.LINUX.value else 'wheel'
+                pkg_arch_matrix = [
+                    x for x in release_matrix[os_key]
+                    if (x["package_type"], x["gpu_arch_type"], x["gpu_arch_version"]) ==
+                    (package_type, gpu_arch_type, gpu_arch_version)
+                    ]
 
-                    gpu_arch_type, gpu_arch_version = acc_arch_map[acc_key]
-                    if(DEFAULT in instr):
-                        gpu_arch_type, gpu_arch_version = acc_arch_map["accnone"]
+                if pkg_arch_matrix:
+                    if package_type != "libtorch":
+                        instr["command"] = pkg_arch_matrix[0]["installation"]
+                    else:
+                        if os_key == OperatingSystem.LINUX.value:
+                            rel_entry_dict = {x["devtoolset"]: x["installation"] for x in pkg_arch_matrix}
+                            if instr["versions"] is not None:
+                                for ver in [PRE_CXX11_ABI, CXX11_ABI]:
+                                    instr["versions"][LIBTORCH_DWNL_INSTR[ver]] = rel_entry_dict[ver]
+                        elif os_key == OperatingSystem.WINDOWS.value:
+                            rel_entry_dict = {x["libtorch_config"]: x["installation"] for x in pkg_arch_matrix}
+                            if instr["versions"] is not None:
+                                for ver in [RELEASE, DEBUG]:
+                                     instr["versions"][LIBTORCH_DWNL_INSTR[ver]] = rel_entry_dict[ver]
 
-                    pkg_arch_matrix = list(filter(
-                            lambda x:
-                            (x["package_type"], x["gpu_arch_type"], x["gpu_arch_version"]) ==
-                            (package_type, gpu_arch_type, gpu_arch_version),
-                            release_matrix[os_key]
-                        ))
-
-                    if pkg_arch_matrix:
-                        if package_type != 'libtorch':
-                            instr["command"] = pkg_arch_matrix[0]["installation"]
-                        else:
-                            if os_key == OperatingSystem.LINUX.value:
-                                rel_entry_pre_cxx1 = next(filter(
-                                    lambda x:
-                                    x["devtoolset"] == PRE_CXX11_ABI,
-                                    pkg_arch_matrix
-                                ), None)
-                                rel_entry_cxx1_abi = next(filter(
-                                    lambda x:
-                                    x["devtoolset"] == CXX11_ABI,
-                                    pkg_arch_matrix
-                                ), None)
-                                if(instr['versions'] is not None):
-                                    instr['versions'][LIBTORCH_DWNL_INSTR[PRE_CXX11_ABI]] = rel_entry_pre_cxx1["installation"]
-                                    instr['versions'][LIBTORCH_DWNL_INSTR[CXX11_ABI]] = rel_entry_cxx1_abi["installation"]
-                            elif os_key == OperatingSystem.WINDOWS.value:
-                                rel_entry_release = next(filter(
-                                    lambda x:
-                                    x["libtorch_config"] == RELEASE,
-                                    pkg_arch_matrix
-                                ), None)
-                                rel_entry_debug = next(filter(
-                                    lambda x:
-                                    x["libtorch_config"] == DEBUG,
-                                    pkg_arch_matrix
-                                ), None)
-                                if(instr['versions'] is not None):
-                                    instr['versions'][LIBTORCH_DWNL_INSTR[RELEASE]] = rel_entry_release["installation"]
-                                    instr['versions'][LIBTORCH_DWNL_INSTR[DEBUG]] = rel_entry_debug["installation"]
-
-
+# This method is used for generating new quick-start-module.js
+# from the versions json object
 def gen_install_matrix(versions) -> Dict[str, str]:
-    rc = {}
+    result = {}
     version_map = {
         "preview": "preview",
         "stable": versions["latest_stable"],
@@ -158,36 +145,30 @@ def gen_install_matrix(versions) -> Dict[str, str]:
         for os_key, os_vers in versions["versions"][ver_key].items():
             for pkg_key, pkg_vers in os_vers.items():
                 for acc_key, instr in pkg_vers.items():
-                   extra_key = 'python' if pkg_key != 'libtorch' else 'cplusplus'
-                   key = f"{ver},{pkg_key},{os_key},{acc_key},{extra_key}"
-                   note = instr["note"]
-                   lines = [note] if note is not None else []
-                   if pkg_key == "libtorch":
-                      ivers = instr["versions"]
-                      if ivers is not None:
-                          lines += [f"{lab}<br /><a href='{val}'>{val}</a>" for (lab, val) in ivers.items()]
-                   else:
-                       command = instr["command"]
-                       if command is not None:
-                           lines.append(command)
-                   rc[key] = "<br />".join(lines)
-    return rc
+                    extra_key = 'python' if pkg_key != 'libtorch' else 'cplusplus'
+                    key = f"{ver},{pkg_key},{os_key},{acc_key},{extra_key}"
+                    note = instr["note"]
+                    lines = [note] if note is not None else []
+                    if pkg_key == "libtorch":
+                        ivers = instr["versions"]
+                        if ivers is not None:
+                            lines += [f"{lab}<br /><a href='{val}'>{val}</a>" for (lab, val) in ivers.items()]
+                    else:
+                        command = instr["command"]
+                        if command is not None:
+                            lines.append(command)
+                    result[key] = "<br />".join(lines)
+    return result
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--autogenerate",
-        help="Is this call being initiated from workflow? update published_versions",
-        type=str,
-        choices=[ENABLE, DISABLE],
-        default=ENABLE,
-    )
+    parser.add_argument('--autogenerate', dest='autogenerate', action='store_true')
+    parser.set_defaults(autogenerate=False)
 
     options = parser.parse_args()
     versions = read_published_versions()
 
-
-    if options.autogenerate == ENABLE:
+    if options.autogenerate:
         release_matrix = {}
         for val in ("nightly", "release"):
             release_matrix[val] = {}
@@ -199,14 +180,11 @@ def main():
 
         write_published_versions(versions)
 
-
     template = read_quick_start_module_template()
     versions_str = json.dumps(gen_install_matrix(versions))
     template = template.replace("{{ installMatrix }}", versions_str)
     template = template.replace("{{ VERSION }}", f"\"Stable ({versions['latest_stable']})\"")
     print(template.replace("{{ ACC ARCH MAP }}", json.dumps(acc_arch_ver_map)))
-
-
 
 if __name__ == "__main__":
     main()
