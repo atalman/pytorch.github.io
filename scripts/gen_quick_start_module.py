@@ -123,7 +123,10 @@ def update_versions(versions, release_matrix, release_version):
                         instr["command"] = pkg_arch_matrix[0]["installation"]
                     else:
                         if os_key == OperatingSystem.LINUX.value:
-                            rel_entry_dict = {x["devtoolset"]: x["installation"] for x in pkg_arch_matrix}
+                            rel_entry_dict = {
+                                x["devtoolset"]: x["installation"] for x in pkg_arch_matrix
+                                if x["libtorch_variant"] == "shared-with-deps"
+                                }
                             if instr["versions"] is not None:
                                 for ver in [PRE_CXX11_ABI, CXX11_ABI]:
                                     instr["versions"][LIBTORCH_DWNL_INSTR[ver]] = rel_entry_dict[ver]
